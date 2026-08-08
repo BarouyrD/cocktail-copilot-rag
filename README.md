@@ -299,17 +299,13 @@ make data        # uv run python cocktail_assistant/generate_data.py
 
 ## Screenshots
 
-> Add your own screenshots here so reviewers can see the app without running it.
-> Drop the image files into a `docs/` folder and update the paths below. In the
-> GitHub web editor you can also drag-and-drop an image directly into this file.
-
 **Cocktail assistant (Streamlit UI)**
 
-![Streamlit app](docs/app.png)
+![Streamlit app](llm-1.png)
 
 **Grafana monitoring dashboard**
 
-![Grafana dashboard](docs/grafana.png)
+![Grafana dashboard](llm-2.png)
 
 ## Troubleshooting
 
