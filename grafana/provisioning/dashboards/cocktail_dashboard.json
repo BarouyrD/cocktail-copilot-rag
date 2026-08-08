@@ -1,0 +1,127 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 0,
+  "schemaVersion": 39,
+  "tags": ["cocktails"],
+  "time": { "from": "now-6h", "to": "now" },
+  "refresh": "30s",
+  "title": "Cocktail Assistant Monitoring",
+  "uid": "cocktail-assistant-v1",
+  "version": 1,
+  "templating": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Recent conversations",
+      "type": "table",
+      "datasource": { "type": "postgres", "uid": "postgres-cocktail" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT timestamp AS \"time\", question, answer, response_time, cost FROM conversations WHERE timestamp BETWEEN $__timeFrom() AND $__timeTo() ORDER BY timestamp DESC LIMIT 5",
+          "datasource": { "type": "postgres", "uid": "postgres-cocktail" }
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Model usage",
+      "type": "barchart",
+      "datasource": { "type": "postgres", "uid": "postgres-cocktail" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT model, COUNT(*) AS count FROM conversations WHERE timestamp BETWEEN $__timeFrom() AND $__timeTo() GROUP BY model",
+          "datasource": { "type": "postgres", "uid": "postgres-cocktail" }
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Relevance distribution",
+      "type": "piechart",
+      "datasource": { "type": "postgres", "uid": "postgres-cocktail" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT relevance, COUNT(*) AS count FROM feedback WHERE source = 'judge' AND timestamp BETWEEN $__timeFrom() AND $__timeTo() GROUP BY relevance",
+          "datasource": { "type": "postgres", "uid": "postgres-cocktail" }
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Response time",
+      "type": "timeseries",
+      "datasource": { "type": "postgres", "uid": "postgres-cocktail" },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 16 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT timestamp AS \"time\", response_time FROM conversations WHERE timestamp BETWEEN $__timeFrom() AND $__timeTo() ORDER BY timestamp",
+          "datasource": { "type": "postgres", "uid": "postgres-cocktail" }
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Token usage",
+      "type": "timeseries",
+      "datasource": { "type": "postgres", "uid": "postgres-cocktail" },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 16 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroup(timestamp, $__interval) AS \"time\", AVG(total_tokens) AS avg_tokens FROM conversations WHERE timestamp BETWEEN $__timeFrom() AND $__timeTo() GROUP BY 1 ORDER BY 1",
+          "datasource": { "type": "postgres", "uid": "postgres-cocktail" }
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Cost",
+      "type": "timeseries",
+      "datasource": { "type": "postgres", "uid": "postgres-cocktail" },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 16 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroup(timestamp, $__interval) AS \"time\", SUM(cost) AS total_cost FROM conversations WHERE timestamp BETWEEN $__timeFrom() AND $__timeTo() AND cost > 0 GROUP BY 1 ORDER BY 1",
+          "datasource": { "type": "postgres", "uid": "postgres-cocktail" }
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "User feedback",
+      "type": "piechart",
+      "datasource": { "type": "postgres", "uid": "postgres-cocktail" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 24 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT SUM(CASE WHEN score > 0 THEN 1 ELSE 0 END) AS thumbs_up, SUM(CASE WHEN score < 0 THEN 1 ELSE 0 END) AS thumbs_down FROM feedback WHERE source = 'user' AND timestamp BETWEEN $__timeFrom() AND $__timeTo()",
+          "datasource": { "type": "postgres", "uid": "postgres-cocktail" }
+        }
+      ]
+    }
+  ]
+}

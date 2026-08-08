@@ -1,0 +1,16 @@
+apiVersion: 1
+
+datasources:
+  - name: PostgreSQL
+    uid: postgres-cocktail
+    type: postgres
+    access: proxy
+    url: postgres:5432
+    database: cocktail_assistant
+    user: user
+    isDefault: true
+    secureJsonData:
+      password: password
+    jsonData:
+      sslmode: disable
+      postgresVersion: 1700

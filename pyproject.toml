@@ -1,0 +1,30 @@
+[project]
+name = "cocktail-assistant"
+version = "0.1.0"
+description = "A RAG application that answers cocktail questions using TheCocktailDB data."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "openai>=1.54.0",
+    "minsearch>=0.0.4",
+    "requests>=2.32.0",
+    "pandas>=2.2.0",
+    "numpy>=1.26.0",
+    "python-dotenv>=1.0.0",
+    "psycopg[binary]>=3.2.0",
+    "streamlit>=1.39.0",
+    "onnxruntime>=1.19.0",
+    "tokenizers>=0.20.0",
+    "huggingface-hub>=0.26.0",
+    "pydantic>=2.9.0",
+    "tqdm>=4.66.0",
+]
+
+[dependency-groups]
+dev = [
+    "jupyter>=1.1.0",
+    "ipykernel>=6.29.0",
+]
+
+[tool.setuptools]
+packages = ["cocktail_assistant"]
