@@ -1,39 +1,38 @@
-.PHONY: install download ingest db up down dashboard data airflow-up airflow-down
+# Thin wrapper around the cross-platform CLI (cocktail_assistant/cli.py).
+# On Windows / PowerShell (no `make`), use the same tasks directly, e.g.:
+#     uv run cocktail-cli download
+.PHONY: install download ingest db up down dashboard data app airflow-up airflow-down
 
-# Install dependencies
+# Install dependencies (also installs the `cocktail-cli` command)
 install:
 	uv sync
 
-# Download the ONNX embedding model into models/
 download:
-	uv run python cocktail_assistant/download.py
+	uv run cocktail-cli download
 
-# Fetch cocktail data from TheCocktailDB into data/cocktails.csv
 ingest:
-	uv run python cocktail_assistant/ingest.py
+	uv run cocktail-cli ingest
 
-# Initialize the PostgreSQL tables
 db:
-	uv run python cocktail_assistant/db_init.py
+	uv run cocktail-cli db
 
-# Start the full stack (postgres + grafana + streamlit)
 up:
-	docker-compose up --build
+	uv run cocktail-cli up
 
 down:
-	docker-compose down
+	uv run cocktail-cli down
 
-# Run the Streamlit monitoring dashboard locally
 dashboard:
-	uv run streamlit run cocktail_assistant/dashboard.py
+	uv run cocktail-cli dashboard
 
-# Pump synthetic conversations into the database
 data:
-	uv run python cocktail_assistant/generate_data.py
+	uv run cocktail-cli data
 
-# Start / stop the standalone Airflow ingestion stack
+app:
+	uv run cocktail-cli app
+
 airflow-up:
-	docker-compose -f airflow/docker-compose.airflow.yaml up
+	uv run cocktail-cli airflow-up
 
 airflow-down:
-	docker-compose -f airflow/docker-compose.airflow.yaml down
+	uv run cocktail-cli airflow-down

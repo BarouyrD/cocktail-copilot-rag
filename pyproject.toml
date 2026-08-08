@@ -20,11 +20,18 @@ dependencies = [
     "tqdm>=4.66.0",
 ]
 
+[project.scripts]
+cocktail-cli = "cocktail_assistant.cli:main"
+
 [dependency-groups]
 dev = [
     "jupyter>=1.1.0",
     "ipykernel>=6.29.0",
 ]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["cocktail_assistant"]

@@ -101,6 +101,12 @@ Requirements: Docker + Docker Compose. For local (non-Docker) runs you also need
    make ingest      # fetch cocktails into data/cocktails.csv (already included)
    ```
 
+   > **Windows / PowerShell (no `make`)?** Every task is also exposed as a
+   > cross-platform command. Run `uv sync` once, then use `uv run cocktail-cli
+   > <task>` for any task, e.g. `uv run cocktail-cli download`,
+   > `uv run cocktail-cli ingest`. See `uv run cocktail-cli --help` for the full
+   > list. The `make` targets below are just thin wrappers around these commands.
+
 ## Running with Docker Compose
 
 Start Postgres, Grafana, and the Streamlit app together:
