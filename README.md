@@ -48,6 +48,44 @@ User ──▶ Streamlit UI (app.py)
 - **Ingestion**: Airflow DAG (or a plain Python script).
 - **Containerization**: Docker Compose (Postgres + Grafana + Streamlit).
 
+## How it works (step by step)
+
+When a user submits a question in the Streamlit UI, the following happens:
+
+1. **Retrieve context (hybrid search).** The question is run through two
+   retrievers in parallel:
+   - a **text search** over the cocktail fields (`minsearch`, TF-IDF with field
+     boosts — `name` ×3, `ingredients` ×2, `category` ×0.5), and
+   - a **vector search** using `all-MiniLM-L6-v2` sentence embeddings (computed
+     locally with `onnxruntime`, no external embedding API).
+   The two ranked lists are merged with **Reciprocal Rank Fusion (RRF)** to
+   produce the final top-5 cocktails. This is implemented in
+   [`rag_helper.py`](cocktail_assistant/rag_helper.py) (`RAGHybrid`).
+
+2. **Build the prompt.** The retrieved cocktails (name, category, glass,
+   ingredients, measures, instructions) are formatted into a context block and
+   inserted into a prompt template, together with a system instruction telling
+   the LLM to answer **only from the provided context** and to say *"I don't
+   know"* if the answer isn't there. This prevents hallucinated recipes.
+
+3. **Call the LLM.** The prompt is sent to OpenAI. The response, along with token
+   counts, latency, and estimated cost, is captured in an `LLMCallRecord`
+   ([`metrics.py`](cocktail_assistant/metrics.py)).
+
+4. **Store the conversation.** The question, answer, model, tokens, response
+   time, and cost are written to the `conversations` table in PostgreSQL
+   ([`db_save.py`](cocktail_assistant/db_save.py)).
+
+5. **Judge relevance.** A second LLM call ("LLM-as-a-judge") classifies the
+   answer as `RELEVANT`, `PARTLY_RELEVANT`, or `NON_RELEVANT` and stores the
+   verdict in the `feedback` table ([`judge.py`](cocktail_assistant/judge.py)).
+
+6. **Collect user feedback.** The user can give a 👍 / 👎 on the answer, which is
+   also stored in the `feedback` table.
+
+7. **Monitor.** Grafana reads directly from PostgreSQL and visualises everything
+   on an auto-provisioned dashboard (see [Monitoring](#monitoring)).
+
 ## Project structure
 
 ```
@@ -81,64 +119,144 @@ User ──▶ Streamlit UI (app.py)
 └── Makefile
 ```
 
-## Setup
+## Prerequisites
 
-Requirements: Docker + Docker Compose. For local (non-Docker) runs you also need
-[`uv`](https://github.com/astral-sh/uv) and Python 3.12.
+| Tool | Version | Install |
+|---|---|---|
+| [Docker Desktop](https://www.docker.com/products/docker-desktop/) | Latest | Required for the full stack |
+| [uv](https://github.com/astral-sh/uv) | Latest | Required for local runs only |
+| Python | 3.12 | Managed by `uv` automatically |
+| OpenAI API key | — | [platform.openai.com](https://platform.openai.com/api-keys) |
 
-1. Copy the environment file and add your OpenAI key:
+---
 
-   ```bash
-   cp .env.example .env
-   # edit .env and set OPENAI_API_KEY
-   ```
+## Quick start (Docker — recommended)
 
-2. (Local only) install dependencies and download the embedding model:
+This is the fastest way to get the full stack running on any machine.
 
-   ```bash
-   make install     # uv sync
-   make download    # download the ONNX model into models/
-   make ingest      # fetch cocktails into data/cocktails.csv (already included)
-   ```
-
-   > **Windows / PowerShell (no `make`)?** Every task is also exposed as a
-   > cross-platform command. Run `uv sync` once, then use `uv run cocktail-cli
-   > <task>` for any task, e.g. `uv run cocktail-cli download`,
-   > `uv run cocktail-cli ingest`. See `uv run cocktail-cli --help` for the full
-   > list. The `make` targets below are just thin wrappers around these commands.
-
-## Running with Docker Compose
-
-Start Postgres, Grafana, and the Streamlit app together:
+### 1. Clone the repository
 
 ```bash
-docker-compose up --build
+git clone https://github.com/your-username/cocktail-copilot-rag.git
+cd cocktail-copilot-rag
 ```
 
-Initialize the database tables (one time):
+### 2. Create your `.env` file
+
+Copy the provided template and add your OpenAI key:
 
 ```bash
-docker-compose exec streamlit python cocktail_assistant/db_init.py
+cp .env.example .env
 ```
 
-- App: http://localhost:8501
-- Grafana: http://localhost:3000 (login: `admin` / `admin`)
+Then open `.env` and set your real key. The file should look like this:
 
-Stop everything:
+```env
+# OpenAI API key (required)
+OPENAI_API_KEY=sk-proj-...your-key-here...
+
+# PostgreSQL connection
+POSTGRES_HOST=localhost
+POSTGRES_DB=cocktail_assistant
+POSTGRES_USER=user
+POSTGRES_PASSWORD=password
+
+# Grafana admin password
+GRAFANA_ADMIN_PASSWORD=admin
+```
+
+> **How `POSTGRES_HOST` works:** keep it as `localhost`. When running under
+> Docker Compose, the value is **automatically overridden to `postgres`** (the
+> service name on the Docker network), so the same `.env` works for both Docker
+> and local runs without edits.
+
+> **Never commit your `.env` file.** It is already listed in `.gitignore`, and
+> the only tracked version is `.env.example`, which contains no secrets.
+
+### 3. Start the stack
 
 ```bash
-docker-compose down
+docker compose up --build
 ```
 
-Data in PostgreSQL and Grafana persists across restarts via Docker volumes.
+Or on Windows / PowerShell (no `make`):
+
+```powershell
+uv run cocktail-cli up
+```
+
+Docker will:
+1. Build the Streamlit image (downloads the ONNX embedding model at build time).
+2. Start Postgres and wait for it to be healthy.
+3. Start Grafana (auto-provisioned with the monitoring dashboard).
+4. Start Streamlit — the entrypoint script **automatically creates the database
+   tables** on every startup, so no manual DB init step is needed.
+
+### 4. Open the apps
+
+| Service | URL | Login |
+|---|---|---|
+| **Cocktail assistant** | http://localhost:8501 | — |
+| **Grafana dashboard** | http://localhost:3000 | `admin` / `admin` |
+
+### 5. Stop the stack
+
+```bash
+docker compose down
+```
+
+Data in PostgreSQL and Grafana persists across restarts via named Docker volumes.
+To wipe everything (including data):
+
+```bash
+docker compose down -v
+```
+
+---
 
 ## Running locally (without Docker)
 
+Use this if you want to run the Streamlit app or notebooks outside of Docker
+(e.g. for development). You still need a running PostgreSQL instance — the
+easiest way is to start only the database container:
+
 ```bash
-make db          # create tables (needs a running PostgreSQL)
-make up          # or: uv run streamlit run cocktail_assistant/app.py
-make dashboard   # the Streamlit monitoring dashboard
+docker compose up postgres -d
 ```
+
+Then install dependencies and start the app:
+
+```bash
+# macOS / Linux
+make install    # uv sync — installs the project and all dependencies
+make download   # download the ONNX embedding model into models/
+make app        # run the Streamlit app on http://localhost:8501
+
+# Windows / PowerShell
+uv sync
+uv run cocktail-cli download
+uv run cocktail-cli app
+```
+
+> **Note:** Running locally uses `POSTGRES_HOST=localhost` (the default in
+> `.env.example`), so the app connects to the port `5432` that the Postgres
+> container exposes on your machine. You still need the OpenAI key set in `.env`.
+
+### Available CLI commands
+
+Every `make` target has a Windows-compatible equivalent:
+
+| Task | make | PowerShell |
+|---|---|---|
+| Install dependencies | `make install` | `uv sync` |
+| Download ONNX model | `make download` | `uv run cocktail-cli download` |
+| Fetch cocktail data | `make ingest` | `uv run cocktail-cli ingest` |
+| Start full Docker stack | `make up` | `uv run cocktail-cli up` |
+| Stop full Docker stack | `make down` | `uv run cocktail-cli down` |
+| Run Streamlit app locally | `make app` | `uv run cocktail-cli app` |
+| Run monitoring dashboard | `make dashboard` | `uv run cocktail-cli dashboard` |
+| Pump sample data | `make data` | `uv run cocktail-cli data` |
+| Start Airflow stack | `make airflow-up` | `uv run cocktail-cli airflow-up` |
 
 ## Ingestion pipeline (Airflow)
 
@@ -179,6 +297,104 @@ To populate the dashboard with sample traffic:
 make data        # uv run python cocktail_assistant/generate_data.py
 ```
 
+## Screenshots
+
+> Add your own screenshots here so reviewers can see the app without running it.
+> Drop the image files into a `docs/` folder and update the paths below. In the
+> GitHub web editor you can also drag-and-drop an image directly into this file.
+
+**Cocktail assistant (Streamlit UI)**
+
+![Streamlit app](docs/app.png)
+
+**Grafana monitoring dashboard**
+
+![Grafana dashboard](docs/grafana.png)
+
+## Troubleshooting
+
+Common issues and how to fix them.
+
+### `docker compose up` fails at `uv sync --locked`
+
+Usually one of:
+- **`package directory 'cocktail_assistant' does not exist`** or
+  **`README.md cannot be found`** — dependencies are installed before the source
+  is copied. This is already handled in the [`Dockerfile`](Dockerfile): the first
+  `uv sync` uses `--no-install-project`, and `README.md` is copied up front.
+- **Lockfile out of date** — regenerate it and rebuild:
+  ```bash
+  uv lock
+  docker compose build --no-cache streamlit
+  ```
+
+### `relation "conversations" does not exist`
+
+The database tables haven't been created. With the current setup the
+[`entrypoint.sh`](entrypoint.sh) script creates them automatically on every
+container start, so a simple restart fixes it:
+
+```bash
+docker compose up --build
+```
+
+To create the tables manually inside the running container:
+
+```bash
+docker compose exec streamlit python cocktail_assistant/db_init.py
+```
+
+### `psycopg` import hangs or errors when running `uv run cocktail-cli db` on Windows
+
+The `psycopg[binary]` wheel can be slow/unreliable to import on some Windows
+setups. You don't need to run DB init locally — it happens automatically inside
+Docker. If you want to run it manually, do it in the container instead:
+
+```bash
+docker compose exec streamlit python cocktail_assistant/db_init.py
+```
+
+### Grafana shows "No data" or "you do not currently have a default database configured"
+
+1. Make sure Postgres actually has data (ask the app a question first, or run
+   `make data` to generate sample traffic).
+2. Confirm the datasource provisioning file
+   [`grafana/provisioning/datasources/postgres.yaml`](grafana/provisioning/datasources/postgres.yaml)
+   sets a `database`, then restart Grafana:
+   ```bash
+   docker compose restart grafana
+   ```
+3. If it still misbehaves, reset **only** Grafana's state (this does not touch
+   your Postgres data):
+   ```bash
+   docker compose stop grafana
+   docker volume rm cocktail-copilot-rag_grafana_data
+   docker compose up -d grafana
+   ```
+4. Check the dashboard time range (top-right) — the default is *Last 6 hours*.
+
+### Port already in use (`5432`, `3000`, `8501`, or `8080`)
+
+Another process is using that port. Either stop it, or change the host-side port
+in [`docker-compose.yaml`](docker-compose.yaml), e.g. map Postgres to
+`5433:5432`. Then restart with `docker compose up --build`.
+
+### `OPENAI_API_KEY` not set / 401 errors from OpenAI
+
+Ensure `.env` exists and contains a valid `OPENAI_API_KEY`. After editing `.env`,
+restart the stack (`docker compose up --build`) so the container picks up the new
+value. If a key was ever committed or shared, **rotate it** in the OpenAI
+dashboard.
+
+### Start completely fresh
+
+To wipe all containers, volumes, and data and rebuild from scratch:
+
+```bash
+docker compose down -v
+docker compose up --build
+```
+
 ## Technologies
 
 - **OpenAI** — LLM (answers + structured evaluation), via the `openai` SDK.
@@ -193,15 +409,21 @@ make data        # uv run python cocktail_assistant/generate_data.py
 
 ## Evaluation criteria coverage
 
-| Criterion | How it is addressed |
-|---|---|
-| Problem description | This README |
-| Retrieval flow | Knowledge base + LLM (hybrid retrieval → prompt → OpenAI) |
-| Retrieval evaluation | text / vector / hybrid compared (notebook 03) |
-| LLM evaluation | two prompts compared via LLM judge (notebook 04) |
-| Interface | Streamlit UI |
-| Ingestion pipeline | Airflow DAG (+ Python script) |
-| Monitoring | Postgres + Grafana (7 panels) and user feedback |
-| Containerization | full `docker-compose.yaml` |
-| Reproducibility | pinned deps, included data, clear instructions |
-| Best practices | hybrid text + vector search (RRF) |
+This section maps the project to the LLM Zoomcamp grading rubric so reviewers can
+quickly find each piece.
+
+| Criterion | How it is addressed | Where to look |
+|---|---|---|
+| **Problem description** | A clear real-world problem (scattered, inconsistent cocktail recipes) solved with grounded RAG | [Problem description](#problem-description) |
+| **Retrieval flow** | Both a knowledge base **and** an LLM are used: hybrid retrieval → prompt → OpenAI | [How it works](#how-it-works-step-by-step), [`rag_helper.py`](cocktail_assistant/rag_helper.py) |
+| **Retrieval evaluation** | **Three** approaches compared (text / vector / hybrid) with hit rate & MRR; best (hybrid) is used | [`notebooks/03_retrieval_eval.ipynb`](notebooks/03_retrieval_eval.ipynb) |
+| **LLM evaluation** | **Two** prompt variants compared via an LLM judge; the better prompt is used by default | [`notebooks/04_rag_eval.ipynb`](notebooks/04_rag_eval.ipynb) |
+| **Interface** | Streamlit chat UI | [`app.py`](cocktail_assistant/app.py) |
+| **Ingestion pipeline** | Automated with **Airflow** (plus an equivalent Python script) | [`airflow/dags/ingest_cocktails.py`](airflow/dags/ingest_cocktails.py), [`ingest.py`](cocktail_assistant/ingest.py) |
+| **Monitoring** | User feedback **and** a Grafana dashboard with **7 charts** | [Monitoring](#monitoring), [`grafana/`](grafana/) |
+| **Containerization** | Everything (Postgres + Grafana + Streamlit) in one `docker-compose.yaml` | [`docker-compose.yaml`](docker-compose.yaml) |
+| **Reproducibility** | Clear step-by-step instructions, dataset included in `data/`, all dependency versions pinned in `uv.lock` | [Quick start](#quick-start-docker--recommended), [`pyproject.toml`](pyproject.toml), `uv.lock` |
+| **Best practices — hybrid search** | Text + vector search combined with Reciprocal Rank Fusion (RRF) and evaluated | [`rag_helper.py`](cocktail_assistant/rag_helper.py), [`notebooks/03_retrieval_eval.ipynb`](notebooks/03_retrieval_eval.ipynb) |
+
+**Not implemented (optional/bonus):** document re-ranking, user query rewriting,
+and cloud deployment. The app runs locally via Docker Compose.
